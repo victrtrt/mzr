@@ -1,0 +1,7 @@
+{
+  "name": "فورم استخدام کارشناس فروش برند ویکتوریارز",
+  "description": "فورم استخدام کارشناس فروش برند ویکتوریارز با طراحی ساده، زبان دری و قابلیت اتصال به Google Drive",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
