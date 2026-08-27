@@ -83,15 +83,36 @@ export const AdminDriveModal: React.FC<AdminDriveModalProps> = ({ isOpen, onClos
 
   const fetchAdminData = async () => {
     setIsLoading(true);
+    let serverSubmissions: FormSubmission[] = [];
+    let savedLocalWebhook = '';
+    try {
+      savedLocalWebhook = localStorage.getItem('vr_webhook_url') || '';
+      if (savedLocalWebhook) {
+        setWebhookUrl(savedLocalWebhook);
+      }
+    } catch (e) {}
+
     try {
       const res = await fetch('/api/admin/submissions');
       if (res.ok) {
         const data = await res.json();
-        setSubmissions(data.submissions || []);
-        setWebhookUrl(data.googleDriveWebhookUrl || '');
+        serverSubmissions = data.submissions || [];
+        if (data.googleDriveWebhookUrl) {
+          setWebhookUrl(data.googleDriveWebhookUrl);
+        }
       }
     } catch (e) {
-      console.error('Failed to load admin data:', e);
+      console.warn('Backend submissions not reachable (static host)');
+    }
+
+    try {
+      const local = JSON.parse(localStorage.getItem('vr_submissions') || '[]');
+      const combinedMap = new Map<string, FormSubmission>();
+      serverSubmissions.forEach((s) => combinedMap.set(s.id, s));
+      local.forEach((s: FormSubmission) => combinedMap.set(s.id, s));
+      setSubmissions(Array.from(combinedMap.values()));
+    } catch (e) {
+      setSubmissions(serverSubmissions);
     } finally {
       setIsLoading(false);
     }
@@ -99,37 +120,69 @@ export const AdminDriveModal: React.FC<AdminDriveModalProps> = ({ isOpen, onClos
 
   const handleSaveWebhook = async () => {
     try {
-      const res = await fetch('/api/admin/webhook', {
+      localStorage.setItem('vr_webhook_url', webhookUrl);
+      setIsSavedWebhook(true);
+      setTimeout(() => setIsSavedWebhook(false), 3000);
+
+      await fetch('/api/admin/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ webhookUrl, adminKey }),
       });
-      if (res.ok) {
-        setIsSavedWebhook(true);
-        setTimeout(() => setIsSavedWebhook(false), 3000);
-      }
     } catch (e) {
-      console.error('Error saving webhook:', e);
+      console.warn('Saved locally');
     }
   };
 
   const handleTestWebhook = async () => {
+    if (!webhookUrl) return;
     setIsTestingWebhook(true);
     setTestResult(null);
+
+    const testPayload = {
+      event: 'test_connection',
+      id: 'TEST-' + Date.now().toString(36).toUpperCase(),
+      fullName: 'تست سیستم ویکتوریارز',
+      phoneWhatsapp: '0799999999',
+      education: 'لیسانس',
+      salesExperienceYears: '3',
+      previousCompanyName: 'شرکت نمونه',
+      socialProfileUrl: 'instagram.com/test',
+      totalFollowers: '1200',
+      networkCenters: [{ id: '1', name: 'دواخانه تست', address: 'مزار شریف' }],
+      candidateNotes: 'پیام تستی سیستم',
+      ip: 'test-ip',
+      submittedAt: new Date().toISOString(),
+    };
+
     try {
+      // 1. Try server test endpoint first
       const res = await fetch('/api/admin/webhook/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ webhookUrl }),
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setTestResult({ ok: true, msg: 'اتصال با موفقیت برقرار شد و ردیف تستی در گوگل شیت ثبت شد!' });
-      } else {
-        setTestResult({ ok: false, msg: data.error || 'خطا در برقراری ارتباط با وب‌هوک.' });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setTestResult({ ok: true, msg: 'اتصال با موفقیت برقرار شد و ردیف تستی در گوگل شیت ثبت شد!' });
+          return;
+        }
       }
+    } catch (e) {}
+
+    // 2. Direct browser test for GitHub Pages (no-cors)
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(testPayload),
+      });
+      setTestResult({ ok: true, msg: 'درخواست به Google Apps Script ارسال شد! لطفاً گوگل شیت خود را بررسی کنید.' });
     } catch (e: any) {
-      setTestResult({ ok: false, msg: e.message || 'خطا در شبکه' });
+      setTestResult({ ok: false, msg: e.message || 'خطا در ارسال به وب‌هوک' });
     } finally {
       setIsTestingWebhook(false);
     }
@@ -138,16 +191,19 @@ export const AdminDriveModal: React.FC<AdminDriveModalProps> = ({ isOpen, onClos
   const handleDelete = async (id: string) => {
     if (!confirm('آیا از حذف این فورم اطمینان دارید؟')) return;
     try {
-      const res = await fetch(`/api/admin/submissions/${id}`, {
+      const local = JSON.parse(localStorage.getItem('vr_submissions') || '[]');
+      const updated = local.filter((s: FormSubmission) => s.id !== id);
+      localStorage.setItem('vr_submissions', JSON.stringify(updated));
+
+      setSubmissions((prev) => prev.filter((s) => s.id !== id));
+
+      await fetch(`/api/admin/submissions/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminKey }),
       });
-      if (res.ok) {
-        setSubmissions((prev) => prev.filter((s) => s.id !== id));
-      }
     } catch (e) {
-      console.error('Failed to delete:', e);
+      console.warn('Deleted locally');
     }
   };
 
